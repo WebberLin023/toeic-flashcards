@@ -23,6 +23,10 @@ class GenerateRequest(BaseModel):
     api_key: str
     scenario: str = "TOEIC" # TOEIC, GEPT, Daily
 
+class SavePreviewRequest(BaseModel):
+    words: List[dict]
+    scenario: str = "TOEIC"
+
 class ManualGenerateRequest(BaseModel):
     words: str
     api_key: str
@@ -198,14 +202,18 @@ def build_prompt(content_source: str, is_youtube: bool, scenario: str) -> str:
         "words": [
             {{
                 "word": "單字本身",
-                "pos": "詞性 (例如 n., v., adj.)",
-                "meaning": "中文意思",
                 "level": 650 或 750 或 900,
                 "context": "{scenario_desc} 常見考法或情境說明",
                 "core": "核心意思",
                 "collocations": ["搭配詞1 (中文意思)", "搭配詞2 (中文意思)"],
-                "exEn": "英文實戰例句，請將目標單字加上 <strong> 標籤",
-                "exZh": "中文實戰例句，請將目標單字加上 <strong> 標籤",
+                "meanings": [
+                    {{
+                        "pos": "詞性 (例如 n., v., adj.)",
+                        "meaning": "中文意思",
+                        "exEn": "英文實戰例句，請將目標單字加上 <strong> 標籤",
+                        "exZh": "中文實戰例句，請將目標單字加上 <strong> 標籤"
+                    }}
+                ],
                 "examFocus": {{
                     "grammar": "文法說明 (可選)",
                     "synonyms": "同義詞說明 (可選)",
@@ -217,16 +225,26 @@ def build_prompt(content_source: str, is_youtube: bool, scenario: str) -> str:
     }}
     """
 
-def call_gemini(api_key: str, prompt: str):
+import time
+
+def call_gemini(api_key: str, prompt: str, retries: int = 3):
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json"
-        ),
-    )
-    return json.loads(response.text)
+    for attempt in range(retries):
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                ),
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            if "503" in str(e) and attempt < retries - 1:
+                print(f"Gemini API 503 Unavailable. Retrying in 2 seconds (Attempt {attempt+1}/{retries})...")
+                time.sleep(2)
+            else:
+                raise e
 
 @app.get("/api/words")
 def get_words():
@@ -297,23 +315,29 @@ def generate_cards(req: GenerateRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process with Gemini API: {str(e)}")
 
-@app.post("/api/generate_manual")
-def generate_manual_cards(req: ManualGenerateRequest):
+@app.post("/api/preview_manual")
+def preview_manual_cards(req: ManualGenerateRequest):
     if not req.words.strip():
         raise HTTPException(status_code=400, detail="No words provided")
         
     try:
         prompt = build_prompt(req.words, is_youtube=False, scenario=req.scenario)
         result_json = call_gemini(req.api_key, prompt)
-        
+        return {"status": "success", "words": result_json.get('words', [])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process with Gemini API: {str(e)}")
+
+@app.post("/api/save_manual_preview")
+def save_manual_preview(req: SavePreviewRequest):
+    try:
         current_data = load_data()
         scenario_data = current_data.setdefault(req.scenario, {"words": [], "historyUrls": []})
         
-        merge_words(scenario_data['words'], result_json.get('words', []))
+        merge_words(scenario_data['words'], req.words)
         save_data(current_data)
-        return {"status": "success", "message": "Manual words generated and saved successfully!"}
+        return {"status": "success", "message": "Manual words saved successfully!"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process with Gemini API: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save words: {str(e)}")
 
 # Mount static files
 app.mount("/assets", StaticFiles(directory=BASE_DIR), name="assets")

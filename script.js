@@ -1,6 +1,8 @@
 let fullData = {};
 let wordsList = [];
 let historyUrls = [];
+let previewWordsList = [];
+let selectedWordsForPlayback = new Set();
 
 // Helper for level badges
 function getLevelBadgeHtml(level) {
@@ -37,10 +39,10 @@ function renderCards(words, containerId, filterLevels = ['all'], filterStatuses 
     
     if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        filteredWords = filteredWords.filter(w => 
-            w.word.toLowerCase().includes(query) || 
-            w.meaning.toLowerCase().includes(query)
-        );
+        filteredWords = filteredWords.filter(w => {
+            const meaningsText = (w.meanings || [{meaning: w.meaning}]).map(m => m.meaning).join(' ');
+            return w.word.toLowerCase().includes(query) || meaningsText.toLowerCase().includes(query);
+        });
     }
 
     // Sort words by level initially
@@ -52,17 +54,41 @@ function renderCards(words, containerId, filterLevels = ['all'], filterStatuses 
         card.className = `flashcard level-${item.level}`;
         card.style.animationDelay = `${(index % 20) * 0.05}s`;
         
-        const plainExEn = item.exEn ? item.exEn.replace(/<[^>]+>/g, '').replace(/'/g, "\\'") : '';
+        let meaningsHtml = '';
+        const meaningsList = item.meanings || [{
+            meaning: item.meaning,
+            pos: item.pos,
+            exEn: item.exEn,
+            exZh: item.exZh
+        }];
+        
+        meaningsList.forEach((m, idx) => {
+            const plainExEn = m.exEn ? m.exEn.replace(/<[^>]+>/g, '').replace(/'/g, "\\'") : '';
+            meaningsHtml += `
+                <div class="meaning-group" style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: ${idx < meaningsList.length - 1 ? '1px dashed rgba(255,255,255,0.1)' : 'none'};">
+                    <div style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <span class="word-pos">${m.pos}</span>
+                        <span class="word-meaning">${m.meaning}</span>
+                    </div>
+                    <div class="example-box">
+                        <div class="title-row" style="margin-bottom: 0.5rem; justify-content: space-between; align-items: flex-start;">
+                            <div class="example-en" style="margin-bottom: 0;">${m.exEn}</div>
+                            <button class="pronounce-btn" style="padding: 0; font-size: 1.1rem;" onclick="pronounceWord('${plainExEn}')" title="聆聽例句">🔊</button>
+                        </div>
+                        <div class="example-zh">${m.exZh}</div>
+                    </div>
+                </div>
+            `;
+        });
         
         card.innerHTML = `
             <div class="card-header">
                 <div>
-                    <div class="title-row">
+                    <div class="title-row" style="align-items: center; display: flex; gap: 0.5rem;">
+                        <input type="checkbox" class="word-checkbox" data-word="${item.word}" ${selectedWordsForPlayback.has(item.word) ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer;">
                         <h2 class="word-title">${item.word}</h2>
                         <button class="pronounce-btn" onclick="pronounceWord('${item.word}')" title="聆聽發音">🔊</button>
                     </div>
-                    <span class="word-pos">${item.pos}</span>
-                    <span class="word-meaning">${item.meaning}</span>
                 </div>
                 ${getLevelBadgeHtml(item.level)}
             </div>
@@ -87,13 +113,7 @@ function renderCards(words, containerId, filterLevels = ['all'], filterStatuses 
                 
                 ${getExamFocusHtml(item.examFocus)}
                 
-                <div class="example-box">
-                    <div class="title-row" style="margin-bottom: 0.5rem; justify-content: space-between; align-items: flex-start;">
-                        <div class="example-en" style="margin-bottom: 0;">${item.exEn}</div>
-                        <button class="pronounce-btn" style="padding: 0; font-size: 1.1rem;" onclick="pronounceWord('${plainExEn}')" title="聆聽例句">🔊</button>
-                    </div>
-                    <div class="example-zh">${item.exZh}</div>
-                </div>
+                ${meaningsHtml}
                 
                 <div class="status-toggles">
                     <button class="status-btn s0 ${status === 0 ? 'active' : ''}" onclick="updateStatus('${item.word}', 0)">🔴 不熟</button>
@@ -105,6 +125,30 @@ function renderCards(words, containerId, filterLevels = ['all'], filterStatuses 
         
         container.appendChild(card);
     });
+
+    // Add event listeners for checkboxes
+    document.querySelectorAll('.word-checkbox').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+            const word = e.target.dataset.word;
+            if (e.target.checked) {
+                selectedWordsForPlayback.add(word);
+            } else {
+                selectedWordsForPlayback.delete(word);
+            }
+            updateSelectAllCheckboxState();
+        });
+    });
+}
+
+function updateSelectAllCheckboxState() {
+    const checkboxes = Array.from(document.querySelectorAll('.word-checkbox'));
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    if (checkboxes.length === 0) {
+        if(selectAllCheckbox) selectAllCheckbox.checked = false;
+        return;
+    }
+    const allChecked = checkboxes.every(cb => cb.checked);
+    if(selectAllCheckbox) selectAllCheckbox.checked = allChecked;
 }
 
 function renderHistory() {
@@ -123,12 +167,35 @@ function renderHistory() {
     });
 }
 
+function updateStats() {
+    let levelCounts = { '650': 0, '750': 0, '900': 0, 'all': wordsList.length };
+    let statusCounts = { '0': 0, '1': 0, '2': 0, 'all': wordsList.length };
+
+    wordsList.forEach(w => {
+        if (levelCounts[w.level] !== undefined) levelCounts[w.level]++;
+        const st = (w.status || 0).toString();
+        if (statusCounts[st] !== undefined) statusCounts[st]++;
+    });
+
+    document.querySelector('.filter-btn[data-level="all"]').textContent = `全部程度 (${levelCounts['all']})`;
+    document.querySelector('.filter-btn[data-level="650"]').textContent = `🟢 650+ (${levelCounts['650']})`;
+    document.querySelector('.filter-btn[data-level="750"]').textContent = `🔷 750+ (${levelCounts['750']})`;
+    document.querySelector('.filter-btn[data-level="900"]').textContent = `🔶 900+ (${levelCounts['900']})`;
+
+    document.querySelector('.filter-status-btn[data-status="all"]').textContent = `全部狀態 (${statusCounts['all']})`;
+    document.querySelector('.filter-status-btn[data-status="0"]').textContent = `🔴 不熟 (${statusCounts['0']})`;
+    document.querySelector('.filter-status-btn[data-status="1"]').textContent = `🟡 普通 (${statusCounts['1']})`;
+    document.querySelector('.filter-status-btn[data-status="2"]').textContent = `🟢 熟悉 (${statusCounts['2']})`;
+}
+
 function updateUI() {
+    updateStats();
     const activeLevels = Array.from(document.querySelectorAll('.filter-btn.active')).map(b => b.dataset.level);
     const activeStatuses = Array.from(document.querySelectorAll('.filter-status-btn.active')).map(b => b.dataset.status);
     const searchQuery = document.getElementById('searchInput') ? document.getElementById('searchInput').value : '';
     renderCards(wordsList, 'words-container', activeLevels, activeStatuses, searchQuery);
     renderHistory();
+    updateSelectAllCheckboxState();
 }
 
 // Fetch data from backend
@@ -174,11 +241,49 @@ async function updateStatus(word, newStatus) {
     }
 }
 
-// Pronunciation
+// Pronunciation and Voice Management
+let availableVoices = [];
+function loadVoices() {
+    availableVoices = window.speechSynthesis.getVoices();
+}
+if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    loadVoices();
+}
+
+function getBestVoice(lang) {
+    if (availableVoices.length === 0) loadVoices();
+    
+    // Filter voices by language
+    let matchedVoices = availableVoices.filter(v => v.lang.includes(lang) || v.lang.replace('_', '-').includes(lang));
+    
+    if (lang === 'zh-TW') {
+        // Try to find specific Taiwanese voices (Microsoft Hanhan, Yating, Google 國語（臺灣）, etc.)
+        const twKeywords = ['taiwan', 'hanhan', 'yating', 'zhiwei', '國語（臺灣）'];
+        for (let keyword of twKeywords) {
+            const found = matchedVoices.find(v => v.name.toLowerCase().includes(keyword));
+            if (found) return found;
+        }
+    }
+    
+    if (lang === 'en-US') {
+        // Prefer native US voices
+        const enKeywords = ['google us english', 'zira', 'samantha', 'david'];
+        for (let keyword of enKeywords) {
+            const found = matchedVoices.find(v => v.name.toLowerCase().includes(keyword));
+            if (found) return found;
+        }
+    }
+    
+    return matchedVoices[0] || null;
+}
+
 window.pronounceWord = function(word) {
     if ('speechSynthesis' in window) {
         const msg = new SpeechSynthesisUtterance(word);
         msg.lang = 'en-US';
+        const voiceEn = getBestVoice('en-US');
+        if (voiceEn) msg.voice = voiceEn;
         window.speechSynthesis.speak(msg);
     } else {
         alert("您的瀏覽器不支援語音合成功能");
@@ -318,10 +423,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Generate Manual Button logic
+    // Generate Manual Preview Button logic
     const generateManualBtn = document.getElementById('generateManualBtn');
     const manualWordsInput = document.getElementById('manualWords');
     const manualLoader = document.getElementById('manualLoader');
+    const manualInputContainer = document.getElementById('manualInputContainer');
+    const manualPreviewContainer = document.getElementById('manualPreviewContainer');
+    const confirmSaveBtn = document.getElementById('confirmSaveBtn');
+    const cancelPreviewBtn = document.getElementById('cancelPreviewBtn');
 
     generateManualBtn.addEventListener('click', async () => {
         const apiKey = checkApiKey();
@@ -336,21 +445,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         generateManualBtn.disabled = true;
         manualLoader.style.display = 'block';
-        statusMessage.textContent = '正在由 AI 擴充單字資訊，請稍候...';
+        statusMessage.textContent = '正在由 AI 預覽擴充單字資訊，請稍候...';
         statusMessage.className = 'status-message';
 
         try {
-            const res = await fetch('/api/generate_manual', {
+            const res = await fetch('/api/preview_manual', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ words: words, api_key: apiKey, scenario: scenarioSelect.value })
             });
 
             if (res.ok) {
-                statusMessage.textContent = '成功生成並記憶手動單字！';
+                const data = await res.json();
+                previewWordsList = data.words || [];
+                statusMessage.textContent = '預覽產生成功，請確認是否加入。';
                 statusMessage.className = 'status-message success';
-                manualWordsInput.value = '';
-                await fetchWords();
+                
+                manualInputContainer.style.display = 'none';
+                manualPreviewContainer.style.display = 'block';
+                renderCards(previewWordsList, 'previewCards');
             } else {
                 const err = await res.json();
                 statusMessage.textContent = '錯誤: ' + (err.detail || '未知錯誤');
@@ -362,6 +475,45 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             generateManualBtn.disabled = false;
             manualLoader.style.display = 'none';
+        }
+    });
+
+    cancelPreviewBtn.addEventListener('click', () => {
+        previewWordsList = [];
+        manualPreviewContainer.style.display = 'none';
+        manualInputContainer.style.display = 'block';
+        statusMessage.textContent = '';
+    });
+
+    confirmSaveBtn.addEventListener('click', async () => {
+        confirmSaveBtn.disabled = true;
+        statusMessage.textContent = '正在儲存單字...';
+        statusMessage.className = 'status-message';
+        try {
+            const res = await fetch('/api/save_manual_preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ words: previewWordsList, scenario: scenarioSelect.value })
+            });
+
+            if (res.ok) {
+                statusMessage.textContent = '成功新增手動單字！';
+                statusMessage.className = 'status-message success';
+                manualWordsInput.value = '';
+                previewWordsList = [];
+                manualPreviewContainer.style.display = 'none';
+                manualInputContainer.style.display = 'block';
+                await fetchWords();
+            } else {
+                const err = await res.json();
+                statusMessage.textContent = '錯誤: ' + (err.detail || '未知錯誤');
+                statusMessage.className = 'status-message error';
+            }
+        } catch (e) {
+            statusMessage.textContent = '網路錯誤或伺服器無回應';
+            statusMessage.className = 'status-message error';
+        } finally {
+            confirmSaveBtn.disabled = false;
         }
     });
 
@@ -380,12 +532,155 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (res.ok) {
                     statusMessage.textContent = '單字庫已成功清空！';
                     statusMessage.className = 'status-message success';
+                    selectedWordsForPlayback.clear();
                     await fetchWords();
                 }
             } catch (e) {
                 statusMessage.textContent = '清空失敗';
                 statusMessage.className = 'status-message error';
             }
+        });
+    }
+
+    // Playback Logic
+    const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            const checkboxes = document.querySelectorAll('.word-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = isChecked;
+                if (isChecked) {
+                    selectedWordsForPlayback.add(cb.dataset.word);
+                } else {
+                    selectedWordsForPlayback.delete(cb.dataset.word);
+                }
+            });
+        });
+    }
+
+    const playSelectedBtn = document.getElementById('playSelectedBtn');
+    const stopPlaybackBtn = document.getElementById('stopPlaybackBtn');
+
+    if (playSelectedBtn) {
+        playSelectedBtn.addEventListener('click', () => {
+            if (selectedWordsForPlayback.size === 0) {
+                alert("請先勾選想要播放的單字卡！");
+                return;
+            }
+
+            if (!('speechSynthesis' in window)) {
+                alert("您的瀏覽器不支援語音合成功能");
+                return;
+            }
+
+            window.speechSynthesis.cancel(); // Stop any current speech
+            document.querySelectorAll('.playing-highlight').forEach(el => el.classList.remove('playing-highlight'));
+
+            // Get selected words in the order they appear on screen
+            const checkboxes = Array.from(document.querySelectorAll('.word-checkbox')).filter(cb => cb.checked);
+            const wordsToPlay = checkboxes.map(cb => {
+                const wordStr = cb.dataset.word;
+                return wordsList.find(w => w.word === wordStr) || previewWordsList.find(w => w.word === wordStr);
+            }).filter(Boolean);
+
+            if (wordsToPlay.length === 0) return;
+
+            wordsToPlay.forEach((item, index) => {
+                const meaningsList = item.meanings || [{
+                    meaning: item.meaning,
+                    pos: item.pos,
+                    exEn: item.exEn,
+                    exZh: item.exZh
+                }];
+
+                // Prepare voices
+                const voiceEn = getBestVoice('en-US');
+                const voiceZh = getBestVoice('zh-TW');
+
+                // 1. English Word (First time)
+                const msgWord1 = new SpeechSynthesisUtterance(item.word);
+                msgWord1.lang = 'en-US';
+                if (voiceEn) msgWord1.voice = voiceEn;
+                msgWord1.rate = 0.9;
+                
+                msgWord1.onstart = () => {
+                    document.querySelectorAll('.playing-highlight').forEach(el => el.classList.remove('playing-highlight'));
+                    // Find the card element and highlight it
+                    const cb = document.querySelector(`.word-checkbox[data-word="${item.word}"]`);
+                    if (cb) {
+                        const card = cb.closest('.flashcard');
+                        if (card) {
+                            card.classList.add('playing-highlight');
+                            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }
+                };
+
+                // 2. English Word (Second time)
+                const msgWord2 = new SpeechSynthesisUtterance(item.word);
+                msgWord2.lang = 'en-US';
+                if (voiceEn) msgWord2.voice = voiceEn;
+                msgWord2.rate = 0.9;
+
+                // 3. Chinese Meanings
+                const combinedMeanings = meaningsList.map(m => m.meaning).join('，');
+                const msgMeaning = new SpeechSynthesisUtterance(combinedMeanings);
+                msgMeaning.lang = 'zh-TW';
+                if (voiceZh) msgMeaning.voice = voiceZh;
+                msgMeaning.rate = 1.5;
+
+                // 4. English Examples (First time)
+                const combinedExamples = meaningsList.map(m => m.exEn ? m.exEn.replace(/<[^>]+>/g, '').replace(/'/g, "\\'") : '').filter(Boolean).join('. ');
+                const msgEx1 = new SpeechSynthesisUtterance(combinedExamples);
+                msgEx1.lang = 'en-US';
+                if (voiceEn) msgEx1.voice = voiceEn;
+                msgEx1.rate = 0.9;
+
+                // 5. Chinese Examples
+                const combinedZhExamples = meaningsList.map(m => m.exZh ? m.exZh.replace(/<[^>]+>/g, '') : '').filter(Boolean).join('。 ');
+                const msgExZh = new SpeechSynthesisUtterance(combinedZhExamples);
+                msgExZh.lang = 'zh-TW';
+                if (voiceZh) msgExZh.voice = voiceZh;
+                msgExZh.rate = 1.5;
+
+                // 6. English Examples (Second time)
+                const msgEx2 = new SpeechSynthesisUtterance(combinedExamples);
+                msgEx2.lang = 'en-US';
+                if (voiceEn) msgEx2.voice = voiceEn;
+                msgEx2.rate = 0.9;
+
+                let lastUtterance = msgMeaning;
+
+                window.speechSynthesis.speak(msgWord1);
+                window.speechSynthesis.speak(msgWord2);
+                window.speechSynthesis.speak(msgMeaning);
+                
+                if (combinedExamples) {
+                    window.speechSynthesis.speak(msgEx1);
+                    if (combinedZhExamples) {
+                        window.speechSynthesis.speak(msgExZh);
+                    }
+                    window.speechSynthesis.speak(msgEx2);
+                    lastUtterance = msgEx2;
+                }
+
+                // Remove highlight when the last utterance for this word finishes
+                lastUtterance.onend = () => {
+                    if (index === wordsToPlay.length - 1) {
+                        document.querySelectorAll('.playing-highlight').forEach(el => el.classList.remove('playing-highlight'));
+                    }
+                };
+            });
+        });
+    }
+
+    if (stopPlaybackBtn) {
+        stopPlaybackBtn.addEventListener('click', () => {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+            document.querySelectorAll('.playing-highlight').forEach(el => el.classList.remove('playing-highlight'));
         });
     }
 });
