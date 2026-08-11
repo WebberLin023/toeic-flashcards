@@ -43,6 +43,8 @@ function renderCards(words, containerId, filterLevel = 'all', filterStatus = 'al
         card.className = `flashcard level-${item.level}`;
         card.style.animationDelay = `${(index % 20) * 0.05}s`;
         
+        const plainExEn = item.exEn ? item.exEn.replace(/<[^>]+>/g, '').replace(/'/g, "\\'") : '';
+        
         card.innerHTML = `
             <div class="card-header">
                 <div>
@@ -77,7 +79,10 @@ function renderCards(words, containerId, filterLevel = 'all', filterStatus = 'al
                 ${getExamFocusHtml(item.examFocus)}
                 
                 <div class="example-box">
-                    <div class="example-en">${item.exEn}</div>
+                    <div class="title-row" style="margin-bottom: 0.5rem; justify-content: space-between; align-items: flex-start;">
+                        <div class="example-en" style="margin-bottom: 0;">${item.exEn}</div>
+                        <button class="pronounce-btn" style="padding: 0; font-size: 1.1rem;" onclick="pronounceWord('${plainExEn}')" title="聆聽例句">🔊</button>
+                    </div>
                     <div class="example-zh">${item.exZh}</div>
                 </div>
                 
