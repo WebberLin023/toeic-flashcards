@@ -25,6 +25,10 @@ class ManualGenerateRequest(BaseModel):
 class UpdateStatusRequest(BaseModel):
     word: str
     status: int
+    scenario: str = "TOEIC"
+
+class ClearDataRequest(BaseModel):
+    scenario: str = "TOEIC"
 
 DATA_FILE = "data.json"
 
@@ -35,42 +39,64 @@ def get_video_id(url):
         return match.group(1)
     return None
 
+def get_empty_data():
+    return {
+        "TOEIC": {"words": [], "historyUrls": []},
+        "GEPT": {"words": [], "historyUrls": []},
+        "Daily": {"words": [], "historyUrls": []}
+    }
+
 def migrate_data(data):
     """Migrate old data format to new format"""
     needs_save = False
     
-    if "words" not in data:
-        data["words"] = []
-        needs_save = True
-        
-    if "mainWords" in data:
-        data["words"].extend(data.pop("mainWords"))
-        needs_save = True
-        
-    if "derivativeWords" in data:
-        data["words"].extend(data.pop("derivativeWords"))
-        needs_save = True
-        
-    if "historyUrls" not in data:
-        data["historyUrls"] = []
-        needs_save = True
-        
-    for item in data.get("words", []):
-        if "status" not in item:
-            item["status"] = 0
+    # Check if this is the old flat format
+    if "words" in data or "mainWords" in data or "derivativeWords" in data or "historyUrls" in data:
+        # Determine if it's purely old format by checking for TOEIC
+        if "TOEIC" not in data:
+            old_words = data.get("words", [])
+            if "mainWords" in data:
+                old_words.extend(data.get("mainWords", []))
+            if "derivativeWords" in data:
+                old_words.extend(data.get("derivativeWords", []))
+                
+            old_history = data.get("historyUrls", [])
+            
+            # Deduplicate and fix status
+            unique_words = {}
+            for item in old_words:
+                if "status" not in item:
+                    item["status"] = 0
+                word = item.get('word', '').lower()
+                if word not in unique_words:
+                    unique_words[word] = item
+                    
+            new_data = get_empty_data()
+            new_data["TOEIC"]["words"] = list(unique_words.values())
+            new_data["TOEIC"]["historyUrls"] = old_history
+            return new_data, True
+            
+    # If it's already the new format, just ensure all scenarios exist
+    new_data = data
+    for scenario in ["TOEIC", "GEPT", "Daily"]:
+        if scenario not in new_data:
+            new_data[scenario] = {"words": [], "historyUrls": []}
             needs_save = True
-            
-    # Remove duplicates during migration just in case
-    unique_words = {}
-    for item in data.get("words", []):
-        word = item.get('word', '').lower()
-        if word not in unique_words:
-            unique_words[word] = item
-    if len(unique_words) != len(data.get("words", [])):
-        data["words"] = list(unique_words.values())
-        needs_save = True
-            
-    return data, needs_save
+        else:
+            if "words" not in new_data[scenario]:
+                new_data[scenario]["words"] = []
+                needs_save = True
+            if "historyUrls" not in new_data[scenario]:
+                new_data[scenario]["historyUrls"] = []
+                needs_save = True
+                
+            # Check for missing status in new format
+            for item in new_data[scenario].get("words", []):
+                if "status" not in item:
+                    item["status"] = 0
+                    needs_save = True
+                    
+    return new_data, needs_save
 
 from dotenv import load_dotenv
 import requests
@@ -82,7 +108,7 @@ GIST_ID = os.getenv("GIST_ID")
 def load_data():
     if not GITHUB_TOKEN or not GIST_ID:
         print("Missing GITHUB_TOKEN or GIST_ID, falling back to empty dict")
-        return {"words": [], "historyUrls": []}
+        return get_empty_data()
 
     try:
         headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
@@ -97,7 +123,7 @@ def load_data():
             return data
     except Exception as e:
         print(f"Error loading from gist: {e}")
-    return {"words": [], "historyUrls": []}
+    return get_empty_data()
 
 def save_data(data):
     if not GITHUB_TOKEN or not GIST_ID:
@@ -201,16 +227,20 @@ def get_words():
     return load_data()
 
 @app.post("/api/clear_data")
-def clear_data():
-    empty_data = {"words": [], "historyUrls": []}
-    save_data(empty_data)
+def clear_data(req: ClearDataRequest):
+    data = load_data()
+    if req.scenario in data:
+        data[req.scenario] = {"words": [], "historyUrls": []}
+        save_data(data)
     return {"status": "success", "message": "Data cleared successfully"}
 
 @app.post("/api/update_status")
 def update_status(req: UpdateStatusRequest):
     data = load_data()
     word_found = False
-    for item in data.get("words", []):
+    
+    scenario_data = data.get(req.scenario, {"words": []})
+    for item in scenario_data.get("words", []):
         if item.get('word', '').lower() == req.word.lower():
             item['status'] = req.status
             word_found = True
@@ -248,11 +278,13 @@ def generate_cards(req: GenerateRequest):
         result_json = call_gemini(req.api_key, prompt)
         
         current_data = load_data()
-        merge_words(current_data['words'], result_json.get('words', []))
+        scenario_data = current_data.setdefault(req.scenario, {"words": [], "historyUrls": []})
+        
+        merge_words(scenario_data['words'], result_json.get('words', []))
         
         # Add to history if not exists
-        if req.url not in current_data.get('historyUrls', []):
-            current_data.setdefault('historyUrls', []).append(req.url)
+        if req.url not in scenario_data.get('historyUrls', []):
+            scenario_data.setdefault('historyUrls', []).append(req.url)
             
         save_data(current_data)
         return {"status": "success", "message": "Words generated and saved successfully!"}
@@ -269,7 +301,9 @@ def generate_manual_cards(req: ManualGenerateRequest):
         result_json = call_gemini(req.api_key, prompt)
         
         current_data = load_data()
-        merge_words(current_data['words'], result_json.get('words', []))
+        scenario_data = current_data.setdefault(req.scenario, {"words": [], "historyUrls": []})
+        
+        merge_words(scenario_data['words'], result_json.get('words', []))
         save_data(current_data)
         return {"status": "success", "message": "Manual words generated and saved successfully!"}
     except Exception as e:

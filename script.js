@@ -1,3 +1,4 @@
+let fullData = {};
 let wordsList = [];
 let historyUrls = [];
 
@@ -126,23 +127,30 @@ async function fetchWords() {
     try {
         const res = await fetch('/api/words');
         if (res.ok) {
-            const data = await res.json();
-            wordsList = data.words || [];
-            historyUrls = data.historyUrls || [];
-            updateUI();
+            fullData = await res.json();
+            const scenarioSelect = document.getElementById('scenarioSelect');
+            switchScenario(scenarioSelect ? scenarioSelect.value : 'TOEIC');
         }
     } catch (e) {
         console.error("Failed to fetch words", e);
     }
 }
 
+function switchScenario(scenario) {
+    const scenarioData = fullData[scenario] || { words: [], historyUrls: [] };
+    wordsList = scenarioData.words || [];
+    historyUrls = scenarioData.historyUrls || [];
+    updateUI();
+}
+
 // Status update API
 async function updateStatus(word, newStatus) {
     try {
+        const scenario = document.getElementById('scenarioSelect').value;
         const res = await fetch('/api/update_status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ word: word, status: newStatus })
+            body: JSON.stringify({ word: word, status: newStatus, scenario: scenario })
         });
         if (res.ok) {
             // Update local state and UI
@@ -231,6 +239,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const apiKeyInput = document.getElementById('apiKey');
     const scenarioSelect = document.getElementById('scenarioSelect');
     const statusMessage = document.getElementById('statusMessage');
+
+    scenarioSelect.addEventListener('change', () => {
+        switchScenario(scenarioSelect.value);
+    });
 
     function checkApiKey() {
         const apiKey = apiKeyInput.value.trim();
@@ -341,10 +353,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearDataBtn = document.getElementById('clearDataBtn');
     if (clearDataBtn) {
         clearDataBtn.addEventListener('click', async () => {
-            if (!confirm("確定要清空所有單字庫嗎？這將會刪除所有已儲存的單字與紀錄！")) return;
+            if (!confirm("確定要清空當前情境的所有單字庫嗎？這將會刪除所有已儲存的單字與紀錄！")) return;
             
             try {
-                const res = await fetch('/api/clear_data', { method: 'POST' });
+                const res = await fetch('/api/clear_data', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scenario: scenarioSelect.value })
+                });
                 if (res.ok) {
                     statusMessage.textContent = '單字庫已成功清空！';
                     statusMessage.className = 'status-message success';
