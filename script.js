@@ -21,17 +21,17 @@ function getExamFocusHtml(examFocus) {
 }
 
 // Render cards
-function renderCards(words, containerId, filterLevel = 'all', filterStatus = 'all') {
+function renderCards(words, containerId, filterLevels = ['all'], filterStatuses = ['all']) {
     const container = document.getElementById(containerId);
     container.innerHTML = '';
     
     // Filter
     let filteredWords = words;
-    if (filterLevel !== 'all') {
-        filteredWords = filteredWords.filter(w => w.level.toString() === filterLevel);
+    if (!filterLevels.includes('all')) {
+        filteredWords = filteredWords.filter(w => filterLevels.includes(w.level.toString()));
     }
-    if (filterStatus !== 'all') {
-        filteredWords = filteredWords.filter(w => (w.status || 0).toString() === filterStatus);
+    if (!filterStatuses.includes('all')) {
+        filteredWords = filteredWords.filter(w => filterStatuses.includes((w.status || 0).toString()));
     }
 
     // Sort words by level initially
@@ -115,9 +115,9 @@ function renderHistory() {
 }
 
 function updateUI() {
-    const activeLevel = document.querySelector('.filter-btn.active').dataset.level;
-    const activeStatus = document.querySelector('.filter-status-btn.active').dataset.status;
-    renderCards(wordsList, 'words-container', activeLevel, activeStatus);
+    const activeLevels = Array.from(document.querySelectorAll('.filter-btn.active')).map(b => b.dataset.level);
+    const activeStatuses = Array.from(document.querySelectorAll('.filter-status-btn.active')).map(b => b.dataset.status);
+    renderCards(wordsList, 'words-container', activeLevels, activeStatuses);
     renderHistory();
 }
 
@@ -194,8 +194,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterBtns = document.querySelectorAll('.filter-btn');
     filterBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            filterBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            if (btn.dataset.level === 'all') {
+                filterBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            } else {
+                const allBtn = document.querySelector('.filter-btn[data-level="all"]');
+                if (allBtn) allBtn.classList.remove('active');
+                btn.classList.toggle('active');
+                if (document.querySelectorAll('.filter-btn.active').length === 0) {
+                    if (allBtn) allBtn.classList.add('active');
+                }
+            }
             updateUI();
         });
     });
@@ -204,8 +213,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterStatusBtns = document.querySelectorAll('.filter-status-btn');
     filterStatusBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            filterStatusBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            if (btn.dataset.status === 'all') {
+                filterStatusBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            } else {
+                const allBtn = document.querySelector('.filter-status-btn[data-status="all"]');
+                if (allBtn) allBtn.classList.remove('active');
+                btn.classList.toggle('active');
+                if (document.querySelectorAll('.filter-status-btn.active').length === 0) {
+                    if (allBtn) allBtn.classList.add('active');
+                }
+            }
             updateUI();
         });
     });
