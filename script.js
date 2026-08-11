@@ -22,7 +22,7 @@ function getExamFocusHtml(examFocus) {
 }
 
 // Render cards
-function renderCards(words, containerId, filterLevels = ['all'], filterStatuses = ['all']) {
+function renderCards(words, containerId, filterLevels = ['all'], filterStatuses = ['all'], searchQuery = '') {
     const container = document.getElementById(containerId);
     container.innerHTML = '';
     
@@ -33,6 +33,14 @@ function renderCards(words, containerId, filterLevels = ['all'], filterStatuses 
     }
     if (!filterStatuses.includes('all')) {
         filteredWords = filteredWords.filter(w => filterStatuses.includes((w.status || 0).toString()));
+    }
+    
+    if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        filteredWords = filteredWords.filter(w => 
+            w.word.toLowerCase().includes(query) || 
+            w.meaning.toLowerCase().includes(query)
+        );
     }
 
     // Sort words by level initially
@@ -118,7 +126,8 @@ function renderHistory() {
 function updateUI() {
     const activeLevels = Array.from(document.querySelectorAll('.filter-btn.active')).map(b => b.dataset.level);
     const activeStatuses = Array.from(document.querySelectorAll('.filter-status-btn.active')).map(b => b.dataset.status);
-    renderCards(wordsList, 'words-container', activeLevels, activeStatuses);
+    const searchQuery = document.getElementById('searchInput') ? document.getElementById('searchInput').value : '';
+    renderCards(wordsList, 'words-container', activeLevels, activeStatuses, searchQuery);
     renderHistory();
 }
 
@@ -239,6 +248,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const apiKeyInput = document.getElementById('apiKey');
     const scenarioSelect = document.getElementById('scenarioSelect');
     const statusMessage = document.getElementById('statusMessage');
+    const searchInput = document.getElementById('searchInput');
+
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            updateUI();
+        });
+    }
 
     scenarioSelect.addEventListener('change', () => {
         switchScenario(scenarioSelect.value);

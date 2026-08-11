@@ -4,6 +4,12 @@ import re
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+import sys
+
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -310,14 +316,22 @@ def generate_manual_cards(req: ManualGenerateRequest):
         raise HTTPException(status_code=500, detail=f"Failed to process with Gemini API: {str(e)}")
 
 # Mount static files
-app.mount("/assets", StaticFiles(directory="."), name="assets")
+app.mount("/assets", StaticFiles(directory=BASE_DIR), name="assets")
 
 @app.get("/")
 def read_root():
-    return FileResponse("index.html")
+    return FileResponse(os.path.join(BASE_DIR, "index.html"))
 
 @app.get("/{filename}")
 def read_file(filename: str):
-    if os.path.exists(filename):
-        return FileResponse(filename)
+    file_path = os.path.join(BASE_DIR, filename)
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
     raise HTTPException(status_code=404)
+
+if __name__ == "__main__":
+    import uvicorn
+    import webbrowser
+    from threading import Timer
+    Timer(1.5, lambda: webbrowser.open("http://127.0.0.1:8080")).start()
+    uvicorn.run(app, host="0.0.0.0", port=8080)
