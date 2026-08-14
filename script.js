@@ -95,14 +95,15 @@ function renderCards(words, containerId, filterLevels = ['all'], filterStatuses 
             
             <div class="card-body">
                 <div class="info-group">
-                    <h4>多益常見考法</h4>
-                    <div class="info-content">${item.context}</div>
-                </div>
-                
-                <div class="info-group">
                     <h4>核心意思</h4>
                     <div class="info-content">${item.core}</div>
                 </div>
+
+                ${item.memoryTip ? `
+                <div class="info-group">
+                    <h4 style="color: #a78bfa;">💡 記憶法</h4>
+                    <div class="info-content" style="color: #e2e8f0;">${item.memoryTip}</div>
+                </div>` : ''}
                 
                 <div class="info-group">
                     <h4>高頻搭配</h4>
@@ -114,6 +115,11 @@ function renderCards(words, containerId, filterLevels = ['all'], filterStatuses 
                 ${getExamFocusHtml(item.examFocus)}
                 
                 ${meaningsHtml}
+
+                <div class="info-group" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed rgba(255,255,255,0.2);">
+                    <h4>多益常見考法</h4>
+                    <div class="info-content">${item.context}</div>
+                </div>
                 
                 <div class="status-toggles">
                     <button class="status-btn s0 ${status === 0 ? 'active' : ''}" onclick="updateStatus('${item.word}', 0)">🔴 不熟</button>
@@ -380,6 +386,50 @@ document.addEventListener('DOMContentLoaded', () => {
     const generateBtn = document.getElementById('generateBtn');
     const ytUrlInput = document.getElementById('ytUrl');
     const loader = document.getElementById('loader');
+
+    const backfillBtn = document.getElementById('backfillBtn');
+    if (backfillBtn) {
+        backfillBtn.addEventListener('click', async () => {
+            const apiKey = apiKeyInput.value.trim();
+            if (!apiKey) {
+                alert("請先輸入 Gemini API Key");
+                return;
+            }
+            
+            const loader = document.getElementById('backfillLoader');
+            const status = document.getElementById('backfillStatus');
+            backfillBtn.disabled = true;
+            loader.style.display = 'inline-block';
+            status.style.display = 'block';
+            status.style.color = 'var(--text-secondary)';
+            status.textContent = '正在為舊單字產生記憶法，這可能需要幾分鐘的時間，請稍候...';
+            
+            try {
+                const res = await fetch('/api/backfill', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_key: apiKey, scenario: document.getElementById('scenarioSelect').value })
+                });
+                
+                if (res.ok) {
+                    const data = await res.json();
+                    status.style.color = 'var(--primary)';
+                    status.textContent = data.message;
+                    fetchWords(); // reload words
+                } else {
+                    const err = await res.json();
+                    status.style.color = '#ef4444';
+                    status.textContent = '錯誤: ' + (err.detail || '未知錯誤');
+                }
+            } catch (e) {
+                status.style.color = '#ef4444';
+                status.textContent = '網路錯誤或伺服器無回應';
+            } finally {
+                backfillBtn.disabled = false;
+                loader.style.display = 'none';
+            }
+        });
+    }
 
     generateBtn.addEventListener('click', async () => {
         const apiKey = checkApiKey();

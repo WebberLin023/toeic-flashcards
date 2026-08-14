@@ -190,8 +190,9 @@ def build_prompt(content_source: str, is_youtube: bool, scenario: str) -> str:
        * 650：基礎與高頻核心字。
        * 750：中高階進階字。
        * 900：高分衝刺與專業情境字。
-    3. **高頻搭配 (collocations)**：必須包含中文翻譯，例如："front desk receptionist (櫃檯接待員)"
-    4. **出題重點 (examFocus)**：如有需要，請提供額外的重點（選填），可以包含以下屬性：
+    3. **單字記憶法 (memoryTip)**：提供有助於記憶的方法，例如：字首字根拆解法、圖像與情境聯想法，或是間隔重複複習建議等。
+    4. **高頻搭配 (collocations)**：必須包含中文翻譯，例如："front desk receptionist (櫃檯接待員)"
+    5. **出題重點 (examFocus)**：如有需要，請提供額外的重點（選填），可以包含以下屬性：
        * `grammar`: 文法重點 (如 "an opening 空缺是可數名詞")
        * `synonyms`: 常考同義詞 (如 "vacancy")
        * `phrases`: 常考語句 (如 "complete an application")
@@ -205,6 +206,7 @@ def build_prompt(content_source: str, is_youtube: bool, scenario: str) -> str:
                 "level": 650 或 750 或 900,
                 "context": "{scenario_desc} 常見考法或情境說明",
                 "core": "核心意思",
+                "memoryTip": "單字記憶法 (例如字根字首或聯想法)",
                 "collocations": ["搭配詞1 (中文意思)", "搭配詞2 (中文意思)"],
                 "meanings": [
                     {{
@@ -249,6 +251,73 @@ def call_gemini(api_key: str, prompt: str, retries: int = 3):
 @app.get("/api/words")
 def get_words():
     return load_data()
+
+class BackfillRequest(BaseModel):
+    api_key: str
+    scenario: str
+
+@app.post("/api/backfill")
+def backfill_memory_tips(req: BackfillRequest):
+    data = load_data()
+    if req.scenario not in data:
+        return {"status": "success", "message": "無舊單字需要處理！"}
+    
+    words = data[req.scenario].get("words", [])
+    words_to_process = [w for w in words if 'memoryTip' not in w or not w['memoryTip']]
+    
+    if not words_to_process:
+        return {"status": "success", "message": "所有單字都已經有記憶法了！"}
+
+    updated_count = 0
+    batch_size = 10
+    client = genai.Client(api_key=req.api_key)
+
+    for i in range(0, len(words_to_process), batch_size):
+        batch = words_to_process[i:i+batch_size]
+        word_list_str = ", ".join([w['word'] for w in batch])
+        prompt = f"""
+        請為以下單字提供「單字記憶法」(memoryTip)。
+        內容可以包含：字首字根拆解法、圖像與情境聯想法，或是間隔重複複習建議等。盡量簡短扼要。
+        單字列表：{word_list_str}
+        
+        請將結果輸出為 JSON 格式，必須嚴格遵守以下結構:
+        {{
+            "tips": [
+                {{
+                    "word": "單字本身",
+                    "memoryTip": "單字記憶法"
+                }}
+            ]
+        }}
+        """
+        
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt,
+                    config=types.GenerateContentConfig(response_mime_type="application/json"),
+                )
+                result = json.loads(response.text)
+                if 'tips' in result:
+                    tip_dict = {t['word']: t['memoryTip'] for t in result['tips']}
+                    for w in words:
+                        if w['word'] in tip_dict:
+                            w['memoryTip'] = tip_dict[w['word']]
+                            updated_count += 1
+                break # Success, exit retry loop
+            except Exception as e:
+                if "503" in str(e) and attempt < 2:
+                    time.sleep(2)
+                else:
+                    print(f"Error generating backfill tips: {e}")
+                    break
+        time.sleep(1) # Be nice to API
+
+    if updated_count > 0:
+        save_data(data)
+
+    return {"status": "success", "message": f"成功為 {updated_count} 個舊單字產生記憶法！"}
 
 @app.post("/api/clear_data")
 def clear_data(req: ClearDataRequest):

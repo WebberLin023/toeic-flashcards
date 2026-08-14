@@ -22,7 +22,14 @@
         <section class="controls-card">
             <div class="control-group">
                 <label for="apiKey">Gemini API Key</label>
-                <input type="password" id="apiKey" placeholder="輸入您的 Gemini API Key (會儲存在本地)">
+                <div class="input-with-button">
+                    <input type="password" id="apiKey" placeholder="輸入您的 Gemini API Key (會儲存在本地)">
+                    <button id="backfillBtn" class="status-btn" style="padding: 0.6rem 1rem;" title="幫舊單字產生記憶法">
+                        ✨ 補齊舊單字記憶法
+                        <div class="loader" id="backfillLoader" style="display: none; border-left-color: var(--text-primary);"></div>
+                    </button>
+                </div>
+                <p id="backfillStatus" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--accent); display: none;"></p>
             </div>
             
             <div class="control-group">
